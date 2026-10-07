@@ -1,0 +1,4 @@
+# pnpm 11 moved the "which transitive deps may run build scripts" allowlist out of package.json and
+# into this file. Keep this list tight — anything in here can execute arbitrary code during install.
+onlyBuiltDependencies:
+  - unrs-resolver
