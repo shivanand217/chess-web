@@ -1,0 +1,12 @@
+@import 'tailwindcss';
+
+/* Design tokens — tweak these as the UI language solidifies. */
+@theme {
+  --color-board-light: #ebd3b2;
+  --color-board-dark: #a06b4a;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+body {
+  @apply bg-neutral-950 text-neutral-100 antialiased;
+}
