@@ -11,13 +11,21 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@chess/client": "file:../Chess/packages/client",
-    "@chess/protocol": "file:../Chess/packages/protocol",
+    "@chess/client": "link:../Chess/packages/client",
+    "@chess/protocol": "link:../Chess/packages/protocol",
     "next": "^15.1.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zod": "^3.24.1",
     "zustand": "^5.0.2"
+  },
+  "//": "pnpm.overrides rewrites the SDK's internal `workspace:*` references so they resolve against the sibling Chess repo instead of expecting a shared workspace.",
+  "pnpm": {
+    "overrides": {
+      "@chess/client": "link:../Chess/packages/client",
+      "@chess/protocol": "link:../Chess/packages/protocol"
+    },
+    "onlyBuiltDependencies": ["unrs-resolver"]
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
