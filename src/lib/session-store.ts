@@ -1,5 +1,5 @@
-// Minimal Zustand store for the authenticated session. Persists to localStorage so a page reload keeps
-// the user signed in; the token's own expiry (12h default) is still the authoritative lifetime.
+// Zustand store for the authenticated session. Persists to localStorage so a page reload keeps the
+// user signed in; the token's own expiry (12h default) is still the authoritative lifetime.
 'use client';
 
 import { create } from 'zustand';
@@ -11,8 +11,24 @@ interface SessionState {
   session: AuthSession | undefined;
   loading: boolean;
   error: string | undefined;
-  login: (playerId: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
+  signup: (username: string, password: string) => Promise<void>;
   logout: () => void;
+}
+
+async function run(
+  set: (partial: Partial<SessionState>) => void,
+  op: () => Promise<AuthSession>,
+): Promise<void> {
+  set({ loading: true, error: undefined });
+  try {
+    const session = await op();
+    set({ session, loading: false });
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : typeof err === 'string' ? err : 'request failed';
+    set({ loading: false, error: message });
+  }
 }
 
 export const useSession = create<SessionState>()(
@@ -21,15 +37,9 @@ export const useSession = create<SessionState>()(
       session: undefined,
       loading: false,
       error: undefined,
-      async login(playerId) {
-        set({ loading: true, error: undefined });
-        try {
-          const session = await chessClient().http.login(playerId);
-          set({ session, loading: false });
-        } catch (err) {
-          set({ loading: false, error: err instanceof Error ? err.message : 'login failed' });
-        }
-      },
+      login: (username, password) => run(set, () => chessClient().http.login(username, password)),
+      signup: (username, password) =>
+        run(set, () => chessClient().http.signup(username, password)),
       logout() {
         chessClient().http.setSession(undefined);
         set({ session: undefined });
