@@ -1,82 +1,69 @@
-// Held long-poll against the gateway. Cancel aborts the request and sends the matchmaker a DELETE so the
-// pool slot clears. The time control is hard-coded to blitz-3-2 for now — a selector lands with the
-// opponent-filtering UX.
-'use client';
+// Held long-poll driven by the matchmaking store (not a useEffect-level fetch). The store dedupes
+// across React Strict Mode's double-mount — the critical fix without which two requests fire per tab
+// and the matchmaker pairs each player with their own second request. Navigation triggers cancel only
+// on user action, not on remount.
+"use client";
 
-import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { MatchmakingTimeoutError, AuthError } from '@chess/client';
-import { chessClient } from '@/lib/chess-client';
-import { useSession } from '@/lib/session-store';
-import { usePairing } from '@/lib/pairing-store';
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useMatchmaking } from "@/lib/matchmaking-store";
+import { useSession } from "@/lib/session-store";
 
-type Status = 'searching' | 'matched' | 'timeout' | 'error' | 'cancelled';
-
-const TIME_CONTROL = 'blitz-3-2';
+const TIME_CONTROL = "blitz-3-2";
 
 export default function MatchmakingPage() {
   const router = useRouter();
   const { session, logout } = useSession();
-  const setPairing = usePairing((s) => s.set);
-  const [status, setStatus] = useState<Status>('searching');
-  const [message, setMessage] = useState<string>();
+  const status = useMatchmaking((s) => s.status);
+  const pairing = useMatchmaking((s) => s.pairing);
+  const errorMsg = useMatchmaking((s) => s.error);
+  const start = useMatchmaking((s) => s.start);
+  const cancel = useMatchmaking((s) => s.cancel);
+  const reset = useMatchmaking((s) => s.reset);
   const [elapsed, setElapsed] = useState(0);
-  const abortRef = useRef<AbortController>(null);
 
-  // Guard: bounce to login if the session is missing.
+  // Bounce to login if the session is missing.
   useEffect(() => {
-    if (!session) router.replace('/');
+    if (!session) router.replace("/");
   }, [session, router]);
 
-  // Fire the long-poll on mount; abort if the user leaves the page.
+  // Kick off the search on mount — the store dedupes so Strict Mode's second mount is a no-op.
   useEffect(() => {
-    if (!session) return;
-    const controller = new AbortController();
-    abortRef.current = controller;
-    (async () => {
-      try {
-        const match = await chessClient().http.findMatch(TIME_CONTROL, controller.signal);
-        setPairing(match);
-        setStatus('matched');
-        router.replace(`/game/${match.gameId}`);
-      } catch (err) {
-        if (controller.signal.aborted) {
-          setStatus('cancelled');
-          return;
-        }
-        if (err instanceof MatchmakingTimeoutError) {
-          setStatus('timeout');
-          return;
-        }
-        if (err instanceof AuthError) {
-          logout();
-          router.replace('/');
-          return;
-        }
-        setStatus('error');
-        setMessage(err instanceof Error ? err.message : 'unknown error');
-      }
-    })();
-    return () => controller.abort();
-  }, [session, router, setPairing, logout]);
+    if (session && (status === "idle" || status === "cancelled")) {
+      start(TIME_CONTROL);
+    }
+  }, [session, status, start]);
 
-  // Simple seconds counter so the UI feels alive while we wait.
+  // Hand off to the game page when a pairing lands.
   useEffect(() => {
-    if (status !== 'searching') return;
-    const t = setInterval(() => setElapsed((e) => e + 1), 1_000);
-    return () => clearInterval(t);
+    if (status === "matched" && pairing) {
+      router.replace(`/game/${pairing.gameId}`);
+    }
+    if (status === "auth_expired") {
+      logout();
+      router.replace("/");
+    }
+  }, [status, pairing, router, logout]);
+
+  // Live-ticking seconds counter while the long-poll is open.
+  useEffect(() => {
+    if (status !== "searching") return;
+    const start = Date.now();
+    const id = setInterval(
+      () => setElapsed(Math.floor((Date.now() - start) / 1000)),
+      500,
+    );
+    return () => clearInterval(id);
   }, [status]);
 
-  const retry = (): void => {
-    setStatus('searching');
-    setElapsed(0);
-    setMessage(undefined);
-    router.refresh();
+  const onCancel = (): void => {
+    cancel();
+    router.push("/");
   };
 
-  const cancel = (): void => {
-    abortRef.current?.abort();
-    router.push('/');
+  const onRetry = (): void => {
+    reset();
+    start(TIME_CONTROL);
   };
 
   return (
@@ -87,28 +74,28 @@ export default function MatchmakingPage() {
           Time control <span className="font-mono">{TIME_CONTROL}</span>
           {session ? (
             <>
-              {' · '}
+              {" · "}
               <span className="font-mono">{session.username}</span>
             </>
           ) : null}
         </p>
       </header>
 
-      {status === 'searching' ? (
+      {status === "searching" ? (
         <section className="flex flex-col gap-4">
           <div className="flex items-center gap-3">
             <span className="h-3 w-3 animate-pulse rounded-full bg-emerald-400" />
             <p className="text-sm text-neutral-300">
-              Looking for an opponent… <span className="font-mono text-neutral-500">{elapsed}s</span>
+              Looking for an opponent…{" "}
+              <span className="font-mono text-neutral-500">{elapsed}s</span>
             </p>
           </div>
           <p className="text-xs text-neutral-500">
-            The matchmaker widens the rating window the longer you wait, so a lonely extreme-rating
-            player still gets paired.
+            The matchmaker widens the rating window the longer you wait.
           </p>
           <button
             type="button"
-            onClick={cancel}
+            onClick={onCancel}
             className="w-fit rounded border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
           >
             Cancel
@@ -116,24 +103,26 @@ export default function MatchmakingPage() {
         </section>
       ) : null}
 
-      {status === 'matched' ? (
+      {status === "matched" ? (
         <p className="text-sm text-emerald-400">Matched. Loading board…</p>
       ) : null}
 
-      {status === 'timeout' ? (
+      {status === "timeout" ? (
         <section className="flex flex-col gap-3">
-          <p className="text-sm text-neutral-300">No opponent showed up in time.</p>
+          <p className="text-sm text-neutral-300">
+            No opponent showed up in time.
+          </p>
           <div className="flex gap-3">
             <button
               type="button"
-              onClick={retry}
+              onClick={onRetry}
               className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500"
             >
               Try again
             </button>
             <button
               type="button"
-              onClick={() => router.push('/')}
+              onClick={() => router.push("/")}
               className="rounded border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
             >
               Back
@@ -142,14 +131,14 @@ export default function MatchmakingPage() {
         </section>
       ) : null}
 
-      {status === 'error' ? (
+      {status === "error" ? (
         <section className="flex flex-col gap-3">
           <p className="text-sm text-red-400">
-            Something went wrong{message ? `: ${message}` : ''}.
+            Something went wrong{errorMsg ? `: ${errorMsg}` : ""}.
           </p>
           <button
             type="button"
-            onClick={retry}
+            onClick={onRetry}
             className="w-fit rounded bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500"
           >
             Try again
