@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { AuthError, NotFoundError } from "@chess/client";
 import { Board } from "@/components/board";
 import { Clock } from "@/components/clock";
+import { CheckBanner, GameEndBanner } from "@/components/game-banner";
 import { chessClient } from "@/lib/chess-client";
 import { useGameStore } from "@/lib/game-store";
 import { useMatchmaking } from "@/lib/matchmaking-store";
@@ -163,17 +164,11 @@ export default function GamePage({ params }: { params: Promise<Params> }) {
       </div>
 
       <Clock color={topColor} />
+      <CheckBanner />
       <Board />
       <Clock color={bottomColor} />
 
-      {phase === "ended" && result ? (
-        <div className="rounded border border-neutral-800 bg-neutral-900 p-4 text-sm">
-          <p>
-            Game ended — <span className="font-mono">{result}</span> by{" "}
-            <span className="font-mono">{endReason}</span>.
-          </p>
-        </div>
-      ) : null}
+      <GameEndBanner />
 
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
     </main>
