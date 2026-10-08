@@ -26,6 +26,8 @@ interface GameStoreState {
   blackMs: number;
   lastSyncAt: number;
   moves: MoveEntry[];
+  /** True whenever the side to move is in check. Derived locally — the server doesn't send this. */
+  inCheck: boolean;
   lastRejectedReason?: string;
   result?: "1-0" | "0-1" | "1/2-1/2";
   endReason?: "checkmate" | "stalemate" | "draw" | "flag" | "resign";
@@ -71,6 +73,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   blackMs: 0,
   lastSyncAt: Date.now(),
   moves: [],
+  inCheck: false,
 
   connect(opts) {
     if (activeSession) {
@@ -83,6 +86,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       phase: "connecting",
       fen: START_FEN,
       moves: [],
+      inCheck: false,
       error: undefined,
       lastRejectedReason: undefined,
       result: undefined,
@@ -105,6 +109,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
             whiteMs: ev.state.whiteMs,
             blackMs: ev.state.blackMs,
             moves: ev.state.moves,
+            inCheck: rebuilt.inCheck(),
             lastSyncAt: Date.now(),
           });
           break;
@@ -121,6 +126,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
                 ...s.moves,
                 { uci: `${ev.from}${ev.to}`, san: applied.san },
               ],
+              inCheck: chess.inCheck(),
               lastSyncAt: Date.now(),
             }));
           } catch {
@@ -142,6 +148,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
                 whiteMs: ev.whiteMs,
                 blackMs: ev.blackMs,
                 moves: [...s.moves, { uci: applied.lan, san: applied.san }],
+                inCheck: chess.inCheck(),
                 lastSyncAt: Date.now(),
                 lastRejectedReason: undefined,
               }));
