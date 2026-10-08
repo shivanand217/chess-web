@@ -1,132 +1,181 @@
-// Game page stub. The next chunk wires `react-chessboard` + a Zustand game store to the SDK's
-// GameSession so moves actually fire; today it just confirms the pairing + wsUrl handed over cleanly
-// and falls back to GET /games/:id when someone deep-links.
-'use client';
+// Game view: opens a WS session via @chess/client's GameSession, mirrors the state into the Zustand
+// game store, and renders the board + clocks + a thin header. Direct-link / reload rehydrates the
+// pairing from GET /games/:id.
+"use client";
 
-import { use, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { AuthError, NotFoundError, type GameSnapshot } from '@chess/client';
-import { chessClient } from '@/lib/chess-client';
-import { usePairing } from '@/lib/pairing-store';
-import { useSession } from '@/lib/session-store';
+import { use, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { AuthError, NotFoundError } from "@chess/client";
+import { Board } from "@/components/board";
+import { Clock } from "@/components/clock";
+import { chessClient } from "@/lib/chess-client";
+import { useGameStore } from "@/lib/game-store";
+import { useMatchmaking } from "@/lib/matchmaking-store";
+import { useSession } from "@/lib/session-store";
 
 type Params = { gameId: string };
 
-type Resolved =
-  | { kind: 'pairing'; color: 'w' | 'b'; opponent: string; wsUrl: string | undefined }
-  | { kind: 'snapshot'; game: GameSnapshot }
-  | { kind: 'loading' }
-  | { kind: 'error'; message: string };
+interface Bootstrap {
+  wsUrl: string;
+  myColor: "w" | "b";
+  opponent: string;
+}
 
 export default function GamePage({ params }: { params: Promise<Params> }) {
   const { gameId } = use(params);
   const router = useRouter();
   const { session, logout } = useSession();
-  const pairing = usePairing((s) => s.pairing);
-  const clearPairing = usePairing((s) => s.clear);
-  const [state, setState] = useState<Resolved>({ kind: 'loading' });
+  const pairing = useMatchmaking((s) => s.pairing);
+  const resetMatchmaking = useMatchmaking((s) => s.reset);
+  const connect = useGameStore((s) => s.connect);
+  const disconnect = useGameStore((s) => s.disconnect);
+  const resign = useGameStore((s) => s.resign);
+  const phase = useGameStore((s) => s.phase);
+  const myColor = useGameStore((s) => s.myColor);
+  const result = useGameStore((s) => s.result);
+  const endReason = useGameStore((s) => s.endReason);
+  const rejected = useGameStore((s) => s.lastRejectedReason);
+  const error = useGameStore((s) => s.error);
+
+  const [bootstrap, setBootstrap] = useState<Bootstrap | undefined>();
+  const [bootstrapError, setBootstrapError] = useState<string>();
 
   useEffect(() => {
     if (!session) {
-      router.replace('/');
+      router.replace("/");
       return;
     }
 
-    // Fast path: we just got here from /matchmaking and the full match response is in the store.
-    if (pairing && pairing.gameId === gameId) {
-      setState({
-        kind: 'pairing',
-        color: pairing.color,
-        opponent: pairing.opponent.username,
-        wsUrl: pairing.wsUrl,
-      });
-      return;
-    }
-
-    // Slow path: direct link / reload — rehydrate from the gateway.
     (async () => {
+      // Fast path: the matchmaking page just handed us the whole response.
+      if (pairing && pairing.gameId === gameId && pairing.wsUrl) {
+        setBootstrap({
+          wsUrl: pairing.wsUrl,
+          myColor: pairing.color,
+          opponent: pairing.opponent.username,
+        });
+        return;
+      }
+      // Reload / direct-link path: rehydrate from the gateway.
       try {
         const game = await chessClient().http.getGame(gameId);
-        setState({ kind: 'snapshot', game });
+        if (!game.wsUrl) {
+          setBootstrapError("No game-server advertised for this game.");
+          return;
+        }
+        setBootstrap({
+          wsUrl: game.wsUrl,
+          myColor: game.whiteId === session.playerId ? "w" : "b",
+          opponent: "opponent",
+        });
       } catch (err) {
         if (err instanceof NotFoundError) {
-          setState({ kind: 'error', message: 'Game not found' });
+          setBootstrapError("Game not found.");
           return;
         }
         if (err instanceof AuthError) {
           logout();
-          router.replace('/');
+          router.replace("/");
           return;
         }
-        setState({ kind: 'error', message: err instanceof Error ? err.message : 'unknown' });
+        setBootstrapError(
+          err instanceof Error ? err.message : "Failed to load game.",
+        );
       }
     })();
 
-    return () => clearPairing();
-  }, [session, router, pairing, gameId, clearPairing, logout]);
+    return () => resetMatchmaking();
+  }, [session, router, pairing, gameId, resetMatchmaking, logout]);
 
-  return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-6 p-10">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Game</h1>
-          <p className="text-sm text-neutral-400">
-            <span className="font-mono">{gameId}</span>
-          </p>
-        </div>
+  // Open the WS once we know where to go.
+  useEffect(() => {
+    if (!bootstrap || !session) return;
+    connect({
+      wsUrl: bootstrap.wsUrl,
+      gameId,
+      playerId: session.playerId,
+      token: session.token,
+    });
+    return () => disconnect();
+  }, [bootstrap, session, gameId, connect, disconnect]);
+
+  if (bootstrapError) {
+    return (
+      <main className="mx-auto flex max-w-xl flex-col gap-4 p-10">
+        <h1 className="text-2xl font-semibold">Game</h1>
+        <p className="text-sm text-red-400">{bootstrapError}</p>
         <button
           type="button"
-          onClick={() => router.push('/')}
-          className="rounded border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
+          onClick={() => router.push("/")}
+          className="w-fit rounded border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
         >
           Back
         </button>
+      </main>
+    );
+  }
+
+  const topColor: "w" | "b" = myColor === "b" ? "w" : "b";
+  const bottomColor: "w" | "b" = myColor ?? "w";
+
+  return (
+    <main className="mx-auto flex max-w-xl flex-col gap-4 p-6">
+      <header className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">Game</h1>
+          <p className="text-xs text-neutral-500 font-mono">{gameId}</p>
+        </div>
+        <div className="flex gap-2">
+          {phase === "playing" ? (
+            <button
+              type="button"
+              onClick={() => resign()}
+              className="rounded border border-red-700/60 bg-red-900/20 px-3 py-1.5 text-xs text-red-300 hover:bg-red-900/40"
+            >
+              Resign
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => router.push("/")}
+            className="rounded border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
+          >
+            Back
+          </button>
+        </div>
       </header>
 
-      {state.kind === 'loading' ? (
-        <p className="text-sm text-neutral-400">Loading…</p>
-      ) : null}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-neutral-400">
+          {bootstrap ? (
+            <>
+              Playing{" "}
+              <span className="font-mono">
+                {myColor === "w" ? "White" : "Black"}
+              </span>{" "}
+              vs <span className="font-mono">{bootstrap.opponent}</span>
+            </>
+          ) : (
+            "Connecting…"
+          )}
+        </p>
+        {rejected ? <p className="text-xs text-amber-400">{rejected}</p> : null}
+      </div>
 
-      {state.kind === 'pairing' ? (
-        <section className="flex flex-col gap-2 text-sm">
+      <Clock color={topColor} />
+      <Board />
+      <Clock color={bottomColor} />
+
+      {phase === "ended" && result ? (
+        <div className="rounded border border-neutral-800 bg-neutral-900 p-4 text-sm">
           <p>
-            You play <span className="font-mono">{state.color === 'w' ? 'White' : 'Black'}</span>{' '}
-            against <span className="font-mono">{state.opponent}</span>.
+            Game ended — <span className="font-mono">{result}</span> by{" "}
+            <span className="font-mono">{endReason}</span>.
           </p>
-          <p className="text-neutral-400">
-            WS target:{' '}
-            <span className="font-mono text-neutral-500">{state.wsUrl ?? '(unknown)'}</span>
-          </p>
-          <p className="mt-6 rounded border border-neutral-800 bg-neutral-900 p-4 text-neutral-500">
-            Board + clocks land in the next chunk.
-          </p>
-        </section>
+        </div>
       ) : null}
 
-      {state.kind === 'snapshot' ? (
-        <section className="flex flex-col gap-2 text-sm">
-          <p>
-            Status <span className="font-mono">{state.game.status}</span>
-            {state.game.status === 'finished' ? (
-              <>
-                {' · '}result <span className="font-mono">{state.game.result}</span>
-                {' · '}reason <span className="font-mono">{state.game.endReason}</span>
-              </>
-            ) : null}
-          </p>
-          <p className="text-neutral-400">
-            White {state.game.whiteMs}ms · Black {state.game.blackMs}ms · to move{' '}
-            <span className="font-mono">{state.game.turn}</span>
-          </p>
-          <p className="mt-6 rounded border border-neutral-800 bg-neutral-900 p-4 text-neutral-500">
-            Board + clocks land in the next chunk.
-          </p>
-        </section>
-      ) : null}
-
-      {state.kind === 'error' ? (
-        <p className="text-sm text-red-400">{state.message}</p>
-      ) : null}
+      {error ? <p className="text-sm text-red-400">{error}</p> : null}
     </main>
   );
 }
