@@ -9,6 +9,7 @@ import { AuthError, NotFoundError } from "@chess/client";
 import { Board } from "@/components/board";
 import { Clock } from "@/components/clock";
 import { CheckBanner, GameEndBanner } from "@/components/game-banner";
+import { MoveList } from "@/components/move-list";
 import { chessClient } from "@/lib/chess-client";
 import { useGameStore } from "@/lib/game-store";
 import { useMatchmaking } from "@/lib/matchmaking-store";
@@ -167,6 +168,8 @@ export default function GamePage({ params }: { params: Promise<Params> }) {
       <CheckBanner />
       <Board />
       <Clock color={bottomColor} />
+
+      <MoveList />
 
       <GameEndBanner />
 
