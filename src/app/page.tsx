@@ -40,6 +40,13 @@ export default function Home() {
           </button>
           <button
             type="button"
+            onClick={() => router.push("/leaderboard")}
+            className="rounded border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
+          >
+            Leaderboard
+          </button>
+          <button
+            type="button"
             onClick={logout}
             className="rounded border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
           >
