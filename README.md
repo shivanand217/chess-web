@@ -1,125 +1,120 @@
 # chess-web
 
-Frontend for the Chess platform. Next.js 15 App Router + React 19 + Tailwind v4 + Zustand +
-`react-chessboard`. Consumes the typed SDK (`@chess/client`) from the sibling
-[Chess](../Chess) repo via a `link:` reference, so running both locally lets you edit the
-server-side SDK and hot-reload the UI without publishing.
+Browser UI for the chess platform. Next.js 15 App Router, React 19, Tailwind
+v4, Zustand, `react-chessboard`. The backend lives at `../Chess` and this app
+talks to its gateway on `:3000`; the typed SDK (`@chess/client`) is pulled
+in by `link:` so I can edit the SDK and hot-reload the UI without publishing.
 
 ## What's in here
 
-- **Login / signup** on `/` — username + password form, toggles between sign-in and new-account.
-  The gateway's `/auth/token` returns an HS256 JWT; `/auth/signup` creates a player row with a
-  bcrypt-hashed password and returns a token too.
-- **Matchmaking** on `/matchmaking` — held long-poll with a live seconds counter and a cancel
-  button. The in-flight request lives in a Zustand store so React 19's Strict Mode double-mount
-  can't fire it twice (that bug paired each player with their own second request).
-- **Game** on `/game/[gameId]` — `react-chessboard` wired to a Zustand game store that reduces
-  the SDK's typed `GameEvent` stream (gameState, move, ack, end). Server-authoritative clocks
-  with client-side ticking, live "You are in check" indicator, win / lose / draw banner on game
-  end, resign button.
+- **Login + signup** on `/` — one form that toggles. Hits `/auth/token` or
+  `/auth/signup` on the gateway, stashes the HS256 JWT.
+- **Matchmaking** on `/matchmaking` — held long-poll with a seconds counter
+  and a cancel. The in-flight request lives in a Zustand store so React
+  Strict Mode's double-mount in dev can't fire it twice. That bug paired
+  each player with their own duplicate request. Fixed in
+  `src/lib/matchmaking-store.ts` via a module-level `AbortController`.
+- **Game** on `/game/[gameId]` — board wired to a Zustand store that
+  reduces the SDK's typed `GameEvent` stream (`gameState` / `move` / `ack`
+  / `end`). Server-authoritative clocks ticked on the client between
+  updates, in-check indicator, win/lose/draw banner, promotion dialog
+  (hold-and-pick, not auto-queen), move list, resign.
+- **Leaderboard** on `/leaderboard` — paginated top-N with the signed-in
+  player's row highlighted.
 
 ## Prerequisites
 
-| Tool | Version  |
-| ---- | -------- |
-| Node | ≥ 22 LTS |
-| pnpm | 10+      |
+Node 22 LTS, pnpm (via `corepack enable`), and `../Chess` running on
+`localhost:3000`.
 
-The backend has to be reachable at `http://localhost:3000`. Bring it up first (see the sibling
-repo's README).
+## Running
 
-## Running from scratch
+### One command, both repos
+
+The `../Chess` repo has a boot script that brings up compose, applies
+migrations, seeds the DB, starts all five backend services, and starts
+this app:
 
 ```bash
-# 1. One-time install (also after a pull that touches deps)
-cd ~/Documents/bck-works/chess-web
-pnpm install
-
-# 2. Point the frontend at the gateway (dev default is http://localhost:3000)
-cp .env.example .env.local
-
-# 3. Start Next in dev — hot reloads on file save
-pnpm dev                             # :4000
+~/Documents/bck-works/Chess/tools/boot-stack.sh
 ```
 
-Open **http://localhost:4000**.
+Variants:
 
-### Sign in with a seeded account
+```bash
+STOP=1      ...boot-stack.sh    # tear everything down
+SKIP_WEB=1  ...boot-stack.sh    # backend only (if I want to run `pnpm dev` here manually)
+OBS=1       ...boot-stack.sh    # also Prometheus / Grafana / Tempo
+```
 
-The backend seed creates `player_000000` … `player_000019` with the password convention
-`pw_<username>`. So:
+Service logs land in `/tmp/chess-logs/<svc>.log`. This app's is
+`/tmp/chess-logs/web.log`.
+
+### Just the frontend
+
+If the backend is already up:
+
+```bash
+cd ~/Documents/bck-works/chess-web
+pnpm install
+cp .env.example .env.local    # points at http://localhost:3000 by default
+pnpm dev                       # :4000
+```
+
+Open http://localhost:4000.
+
+### Signing in
+
+The seed in `../Chess` creates `player_000000` … `player_000019`.
+The password is `pw_` + the username:
 
 - Username `player_000000`
 - Password `pw_player_000000`
 
-Or click **"Don't have an account? Create one."** and sign up — any username matching
+Or click **Create one** and sign up — any username matching
 `^[a-zA-Z0-9_-]{3,32}$` with a password ≥ 8 chars.
 
-### Play a game
+### Playing a game
 
-1. Open **http://localhost:4000** in two browser windows (one in incognito, so the sessions
-   don't share localStorage).
-2. Sign in as different seeded players (e.g. `player_000000` and `player_000001`).
-3. Both click **Find a match**. Both windows land on `/game/<same-uuid>` within a second or two.
-4. Move a piece in one window → it animates in the other. Clocks swap. In-check and
-   game-end banners fire client-side off `chess.js`.
-
-### Full stack start — backend side
-
-From the sibling repo (see [`../Chess/README.md`](../Chess/README.md) for all the
-troubleshooting detail):
-
-```bash
-cd ~/Documents/bck-works/Chess
-pnpm stack:up                                                   # Postgres + Redis + etcd
-pnpm --filter @chess/db exec drizzle-kit migrate                # once per fresh DB
-SEED_COUNT=20 pnpm --filter @chess/db db:seed                   # once per fresh DB
-pnpm --filter @chess/matchmaker dev     &                       # :3001
-pnpm --filter @chess/session-router dev &                       # :3002
-pnpm --filter @chess/game-server dev    &                       # :3003
-pnpm --filter @chess/gateway dev        &                       # :3000
-# (leaderboard on :3004 is optional for play)
-```
+Open two windows (one incognito, so sessions don't share localStorage).
+Sign in as two different seeded players. Both click **Find a match**.
+Both windows land on `/game/<same-uuid>` within a second.
 
 ## Scripts
 
-|                  |                                       |
-| ---------------- | ------------------------------------- |
-| `pnpm dev`       | `next dev -p 4000`, hot-reload        |
-| `pnpm build`     | production build to `.next/`          |
-| `pnpm start`     | serve the production build on `:4000` |
-| `pnpm lint`      | `next lint`                           |
-| `pnpm typecheck` | `tsc --noEmit`                        |
+- `pnpm dev` — `next dev -p 4000`
+- `pnpm build` — production build to `.next/`
+- `pnpm start` — serve the production build on `:4000`
+- `pnpm lint` — `next lint`
+- `pnpm typecheck` — `tsc --noEmit`
 
-## Structure
+## Layout
 
 ```
-chess-web/
-├── src/
-│   ├── app/
-│   │   ├── layout.tsx                root layout (imports globals.css)
-│   │   ├── globals.css               Tailwind v4 @theme + base styles
-│   │   ├── page.tsx                  login + signup form (toggle)
-│   │   ├── matchmaking/page.tsx      held long-poll, cancel, retry
-│   │   └── game/[gameId]/page.tsx    board + clocks + banners + resign
-│   ├── components/
-│   │   ├── board.tsx                 react-chessboard wrapper
-│   │   ├── clock.tsx                 server-authoritative clock w/ live tick
-│   │   └── game-banner.tsx           CheckBanner + GameEndBanner
-│   └── lib/
-│       ├── chess-client.ts           @chess/client singleton
-│       ├── session-store.ts          auth session, persisted to localStorage
-│       ├── matchmaking-store.ts      long-poll state + module-level dedupe
-│       └── game-store.ts             GameEvent reducer, local chess.js mirror
-├── next.config.mjs                   transpilePackages + .js↔.ts aliasing
-├── postcss.config.mjs                Tailwind v4 PostCSS plugin
-├── pnpm-workspace.yaml               pnpm 11 build-script allowlist
-└── tsconfig.json
+src/
+├── app/
+│   ├── layout.tsx                   root + globals.css
+│   ├── page.tsx                     login + signup toggle
+│   ├── matchmaking/page.tsx         long-poll + cancel
+│   ├── game/[gameId]/page.tsx       board + clocks + banners + resign
+│   └── leaderboard/page.tsx         top-N table
+├── components/
+│   ├── board.tsx                    react-chessboard + promotion flow
+│   ├── clock.tsx                    server-authoritative, locally ticked
+│   ├── move-list.tsx                SAN pairs, auto-scrolls
+│   ├── promotion-dialog.tsx         Q/R/B/N picker
+│   └── game-banner.tsx              CheckBanner + GameEndBanner
+└── lib/
+    ├── chess-client.ts              @chess/client singleton
+    ├── session-store.ts             auth session, persisted
+    ├── matchmaking-store.ts         long-poll + module-level dedupe
+    └── game-store.ts                GameEvent reducer + local chess.js mirror
 ```
 
-## Cross-repo linking
+## Linking against the backend SDK
 
-`package.json` points at the sibling repo's SDK via pnpm's `link:` protocol:
+The SDK isn't published anywhere — I just point at the source. In
+`package.json`:
 
 ```jsonc
 "dependencies": {
@@ -127,8 +122,9 @@ chess-web/
   "@chess/protocol": "link:../Chess/packages/protocol"
 },
 "pnpm": {
-  // The SDK's own package.json uses `workspace:*` for its internal deps; outside its home
-  // workspace that would error. These overrides rewrite the references to the sibling paths.
+  // The SDK's own package.json uses `workspace:*` for its internal deps.
+  // Outside its home workspace that'd error, so these overrides rewrite
+  // those references to the same link: paths.
   "overrides": {
     "@chess/client":   "link:../Chess/packages/client",
     "@chess/protocol": "link:../Chess/packages/protocol"
@@ -136,42 +132,41 @@ chess-web/
 }
 ```
 
-Two Next-config tweaks make this work ([`next.config.mjs`](next.config.mjs)):
+Two Next tweaks (`next.config.mjs`) make this work:
 
-1. `transpilePackages: ['@chess/client', '@chess/protocol']` — tells Next's SWC to compile the
-   TypeScript source (the SDK ships `.ts`, not `.js`).
-2. `webpack.resolve.extensionAlias: { '.js': ['.ts', '.tsx', '.js', '.jsx'] }` — the SDK uses
-   TS-ESM `.js` imports; webpack takes them literally by default and resolution fails. This
-   gives it the TS compiler's semantics.
+- `transpilePackages: ['@chess/client', '@chess/protocol']` — the SDK ships
+  TypeScript source, not compiled `.js`. SWC compiles it on demand.
+- `webpack.resolve.extensionAlias: { '.js': ['.ts', '.tsx', '.js', '.jsx'] }`
+  — the SDK uses TS-ESM `.js` imports internally. Webpack takes those
+  literally by default and resolution fails. This gives it the TS
+  compiler's semantics.
 
 ## Known rough edges
 
-- **Promotion is auto-queen** — no dialog yet. Pawn to the back rank always promotes to a
-  queen.
-- **No move-list panel** — the game store carries `moves[]` but nothing renders it.
-- **No WS auto-reconnect** — a dropped socket shows a red error banner; refreshing the page
+- No WS auto-reconnect. A dropped socket shows a red banner; refresh
   reconnects via `GET /games/:id`.
-- **localStorage sticky session** — a browser reload keeps you signed in until the JWT's
+- Sticky localStorage session. Reloads keep you signed in until the JWT's
   12 h expiry. Sign out explicitly to clear.
-- **No optimistic move animation** — moves animate when the server acks (feels fine on a LAN;
-  on a slow connection you'll notice the latency). Local chess.js validates obvious illegality
-  before sending, so you get instant feedback on bad drops.
+- No optimistic move animation. Moves animate on the server ack — fine on
+  a LAN, visible lag on a slow connection. Local chess.js still validates
+  obvious illegality first so bad drops bounce instantly.
 
 ## Troubleshooting
 
-- **"Failed to fetch" on sign-in** → the gateway isn't up. `curl localhost:3000/healthz` from
-  the Chess repo side.
-- **CORS error in the console** → the gateway's `CORS_ORIGINS` doesn't include the frontend's
-  origin. Dev defaults to `http://localhost:4000`; see the Chess repo's config.
-- **"Both players matched with themselves"** → React Strict Mode double-fired the matchmaking
-  request. Fixed in this repo on `main` via `lib/matchmaking-store.ts`. If you've forked an
-  older state, pull.
-- **`ERR_PNPM_IGNORED_BUILDS: unrs-resolver`** → pnpm 11 asks you to approve build scripts.
-  The repo pins the allowlist in `pnpm-workspace.yaml`; if it got rewritten with a placeholder,
-  overwrite with:
+- **"Failed to fetch" on sign-in** — the gateway isn't up.
+  `curl localhost:3000/healthz` from the `../Chess` side.
+- **CORS error in the console** — the gateway's `CORS_ORIGINS` doesn't
+  include this origin. Dev defaults to `http://localhost:4000`.
+- **Both players matching with themselves** — React Strict Mode fired the
+  matchmaking request twice. Fixed on `main`; pull if you've forked an
+  older state.
+- **`ERR_PNPM_IGNORED_BUILDS: unrs-resolver`** — pnpm 11 asks you to
+  approve build scripts. `pnpm-workspace.yaml` pins the allowlist; if pnpm
+  rewrote it with a placeholder, overwrite with:
   ```yaml
   onlyBuiltDependencies:
     - unrs-resolver
   ```
-- **Blank screen / 500 on `/game/<uuid>`** → check `pnpm dev`'s terminal. Usually the `@chess/*`
-  symlinks got nuked by a reinstall. `pnpm install` again from this directory re-creates them.
+- **Blank screen or 500 on `/game/<uuid>`** — usually the `@chess/*`
+  symlinks got nuked by a reinstall. `pnpm install` again from this
+  directory re-creates them.
