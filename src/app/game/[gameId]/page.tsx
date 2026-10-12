@@ -1,15 +1,17 @@
-// Game view: opens a WS session via @chess/client's GameSession, mirrors the state into the Zustand
-// game store, and renders the board + clocks + a thin header. Direct-link / reload rehydrates the
-// pairing from GET /games/:id.
+// Game view: opens a WS session via @chess/client's GameSession, mirrors state into the Zustand
+// game store, renders the chess.com-style two-column layout — board left (with player strips above
+// and below), moves + controls panel on the right. Reload / direct-link rehydrates from GET /games/:id.
 "use client";
 
 import { use, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthError, NotFoundError } from "@chess/client";
 import { Board } from "@/components/board";
-import { Clock } from "@/components/clock";
 import { CheckBanner, GameEndBanner } from "@/components/game-banner";
 import { MoveList } from "@/components/move-list";
+import { PlayerStrip } from "@/components/player-strip";
+import { SoundToggle } from "@/components/sound-toggle";
 import { chessClient } from "@/lib/chess-client";
 import { useGameStore } from "@/lib/game-store";
 import { useMatchmaking } from "@/lib/matchmaking-store";
@@ -34,13 +36,12 @@ export default function GamePage({ params }: { params: Promise<Params> }) {
   const resign = useGameStore((s) => s.resign);
   const phase = useGameStore((s) => s.phase);
   const myColor = useGameStore((s) => s.myColor);
-  const result = useGameStore((s) => s.result);
-  const endReason = useGameStore((s) => s.endReason);
   const rejected = useGameStore((s) => s.lastRejectedReason);
   const error = useGameStore((s) => s.error);
 
   const [bootstrap, setBootstrap] = useState<Bootstrap | undefined>();
   const [bootstrapError, setBootstrapError] = useState<string>();
+  const [confirmResign, setConfirmResign] = useState(false);
 
   useEffect(() => {
     if (!session) {
@@ -49,7 +50,6 @@ export default function GamePage({ params }: { params: Promise<Params> }) {
     }
 
     (async () => {
-      // Fast path: the matchmaking page just handed us the whole response.
       if (pairing && pairing.gameId === gameId && pairing.wsUrl) {
         setBootstrap({
           wsUrl: pairing.wsUrl,
@@ -58,7 +58,6 @@ export default function GamePage({ params }: { params: Promise<Params> }) {
         });
         return;
       }
-      // Reload / direct-link path: rehydrate from the gateway.
       try {
         const game = await chessClient().http.getGame(gameId);
         if (!game.wsUrl) {
@@ -89,7 +88,6 @@ export default function GamePage({ params }: { params: Promise<Params> }) {
     return () => resetMatchmaking();
   }, [session, router, pairing, gameId, resetMatchmaking, logout]);
 
-  // Open the WS once we know where to go.
   useEffect(() => {
     if (!bootstrap || !session) return;
     connect({
@@ -106,74 +104,141 @@ export default function GamePage({ params }: { params: Promise<Params> }) {
       <main className="mx-auto flex max-w-xl flex-col gap-4 p-10">
         <h1 className="text-2xl font-semibold">Game</h1>
         <p className="text-sm text-red-400">{bootstrapError}</p>
-        <button
-          type="button"
-          onClick={() => router.push("/")}
+        <Link
+          href="/"
           className="w-fit rounded border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
         >
           Back
-        </button>
+        </Link>
       </main>
     );
   }
 
   const topColor: "w" | "b" = myColor === "b" ? "w" : "b";
   const bottomColor: "w" | "b" = myColor ?? "w";
+  const myName = session?.username ?? "You";
+  const oppName = bootstrap?.opponent ?? "opponent";
 
   return (
-    <main className="mx-auto flex max-w-xl flex-col gap-4 p-6">
-      <header className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Game</h1>
-          <p className="text-xs text-neutral-500 font-mono">{gameId}</p>
-        </div>
-        <div className="flex gap-2">
-          {phase === "playing" ? (
-            <button
-              type="button"
-              onClick={() => resign()}
-              className="rounded border border-red-700/60 bg-red-900/20 px-3 py-1.5 text-xs text-red-300 hover:bg-red-900/40"
-            >
-              Resign
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => router.push("/")}
-            className="rounded border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
+    <main className="min-h-screen bg-neutral-950 text-neutral-100">
+      <header className="border-b border-neutral-900 bg-neutral-950/80 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
+          <Link
+            href="/"
+            className="text-sm font-semibold text-neutral-100 hover:text-white"
           >
-            Back
-          </button>
+            Chess
+          </Link>
+          <nav className="flex items-center gap-3 text-xs text-neutral-400">
+            <Link href="/leaderboard" className="hover:text-neutral-200">
+              Leaderboard
+            </Link>
+            <SoundToggle />
+            <Link
+              href="/"
+              className="rounded border border-neutral-800 px-2.5 py-1 hover:bg-neutral-900"
+            >
+              Home
+            </Link>
+          </nav>
         </div>
       </header>
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-neutral-400">
-          {bootstrap ? (
-            <>
-              Playing{" "}
-              <span className="font-mono">
-                {myColor === "w" ? "White" : "Black"}
+      <div className="mx-auto grid max-w-6xl gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        {/* Board column */}
+        <section className="flex min-w-0 flex-col gap-3">
+          <PlayerStrip side={topColor} name={oppName} />
+          <div className="relative">
+            <CheckBanner />
+            <div className="mt-2">
+              <Board />
+            </div>
+          </div>
+          <PlayerStrip side={bottomColor} name={myName} isMe />
+          {rejected ? (
+            <p className="rounded-md border border-amber-800/50 bg-amber-950/30 px-3 py-1.5 text-xs text-amber-300">
+              {rejected}
+            </p>
+          ) : null}
+          {error ? (
+            <p className="rounded-md border border-red-800/60 bg-red-950/40 px-3 py-1.5 text-sm text-red-300">
+              {error}
+            </p>
+          ) : null}
+        </section>
+
+        {/* Side panel */}
+        <aside className="flex min-h-[520px] flex-col gap-3">
+          <div className="rounded-md border border-neutral-800 bg-neutral-900/60 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-neutral-500">
+              Game
+            </div>
+            <div className="mt-1 font-mono text-xs text-neutral-400 break-all">
+              {gameId}
+            </div>
+            <div className="mt-2 text-sm text-neutral-300">
+              You are playing{" "}
+              <span className="font-medium text-neutral-100">
+                {myColor === "w" ? "White" : myColor === "b" ? "Black" : "…"}
               </span>{" "}
-              vs <span className="font-mono">{bootstrap.opponent}</span>
-            </>
-          ) : (
-            "Connecting…"
-          )}
-        </p>
-        {rejected ? <p className="text-xs text-amber-400">{rejected}</p> : null}
+              vs <span className="font-medium text-neutral-100">{oppName}</span>
+            </div>
+          </div>
+
+          <MoveList />
+
+          <GameEndBanner />
+
+          {phase === "playing" ? (
+            <div className="flex gap-2">
+              {confirmResign ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resign();
+                      setConfirmResign(false);
+                    }}
+                    className="flex-1 rounded-md border border-red-600 bg-red-900/60 px-3 py-2 text-sm font-medium text-red-100 hover:bg-red-800"
+                  >
+                    Confirm resign
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmResign(false)}
+                    className="rounded-md border border-neutral-700 px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmResign(true)}
+                  className="flex-1 rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
+                >
+                  Resign
+                </button>
+              )}
+            </div>
+          ) : phase === "ended" ? (
+            <div className="flex gap-2">
+              <Link
+                href="/matchmaking"
+                className="flex-1 rounded-md border border-emerald-700/60 bg-emerald-900/40 px-3 py-2 text-center text-sm font-medium text-emerald-100 hover:bg-emerald-900/60"
+              >
+                New game
+              </Link>
+              <Link
+                href="/"
+                className="rounded-md border border-neutral-700 px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
+              >
+                Home
+              </Link>
+            </div>
+          ) : null}
+        </aside>
       </div>
-
-      <Clock color={topColor} />
-      <CheckBanner />
-      <Board />
-      <Clock color={bottomColor} />
-
-      <MoveList />
-
-      <GameEndBanner />
-
-      {error ? <p className="text-sm text-red-400">{error}</p> : null}
     </main>
   );
 }
