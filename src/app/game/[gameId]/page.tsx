@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthError, NotFoundError } from "@chess/client";
 import { Board } from "@/components/board";
+import { DrawControls } from "@/components/draw-controls";
 import { CheckBanner, GameEndBanner } from "@/components/game-banner";
 import { MoveList } from "@/components/move-list";
 import { PlayerStrip } from "@/components/player-strip";
@@ -188,6 +189,8 @@ export default function GamePage({ params }: { params: Promise<Params> }) {
           <MoveList />
 
           <GameEndBanner />
+
+          {phase === "playing" ? <DrawControls /> : null}
 
           {phase === "playing" ? (
             <div className="flex gap-2">

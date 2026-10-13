@@ -44,6 +44,10 @@ interface GameStoreState {
   result?: "1-0" | "0-1" | "1/2-1/2";
   endReason?: "checkmate" | "stalemate" | "draw" | "flag" | "resign";
   error?: string;
+  /** Whichever side currently has an outstanding draw offer, or undefined. Cleared on any move. */
+  drawOfferFrom?: "w" | "b";
+  /** The opponent declined our draw offer. Set briefly for a tooltip; the UI clears it on next action. */
+  drawDeclinedAt?: number;
 
   connect: (opts: Omit<ConnectOpts, "webSocketImpl">) => void;
   tryDrop: (
@@ -54,6 +58,9 @@ interface GameStoreState {
   selectSquare: (square: string) => void;
   clearSelection: () => void;
   resign: () => void;
+  offerDraw: () => void;
+  respondDraw: (accept: boolean) => void;
+  dismissDrawDeclined: () => void;
   disconnect: () => void;
 }
 
@@ -181,6 +188,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       lastRejectedReason: undefined,
       result: undefined,
       endReason: undefined,
+      drawOfferFrom: undefined,
+      drawDeclinedAt: undefined,
     });
 
     const session = chessClient().connectToGame(opts);
@@ -251,6 +260,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
               selectedSquare: undefined,
               legalTargets: [],
               lastSyncAt: Date.now(),
+              drawOfferFrom: undefined,
             }));
           } catch {
             set({ error: "opponent move desynced; waiting for state" });
@@ -287,6 +297,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
                 legalTargets: [],
                 lastSyncAt: Date.now(),
                 lastRejectedReason: undefined,
+                drawOfferFrom: undefined,
               }));
             } catch {
               // Local chess.js and server disagree. Punt and wait for next state sync.
@@ -310,6 +321,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
             endReason: ev.endReason,
             selectedSquare: undefined,
             legalTargets: [],
+            drawOfferFrom: undefined,
           });
           if (!hasPlayedEnd) {
             hasPlayedEnd = true;
@@ -324,6 +336,12 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
           }
           break;
         }
+        case "drawOffered":
+          set({ drawOfferFrom: ev.from, drawDeclinedAt: undefined });
+          break;
+        case "drawDeclined":
+          set({ drawOfferFrom: undefined, drawDeclinedAt: Date.now() });
+          break;
         case "error":
           set({ phase: "error", error: `${ev.code}: ${ev.message}` });
           break;
@@ -381,6 +399,27 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   },
   resign() {
     activeSession?.resign();
+  },
+
+  offerDraw() {
+    const s = get();
+    if (!activeSession || s.phase !== "playing" || !s.myColor) return;
+    // Optimistically mark the offer as ours — the opponent will see `drawOffered` from the server;
+    // we won't receive our own echo back, so this is the only path that reflects it locally.
+    set({ drawOfferFrom: s.myColor, drawDeclinedAt: undefined });
+    activeSession.offerDraw();
+  },
+
+  respondDraw(accept) {
+    const s = get();
+    if (!activeSession || s.phase !== "playing") return;
+    if (!s.drawOfferFrom || s.drawOfferFrom === s.myColor) return;
+    set({ drawOfferFrom: undefined });
+    activeSession.respondDraw(accept);
+  },
+
+  dismissDrawDeclined() {
+    set({ drawDeclinedAt: undefined });
   },
 
   disconnect() {
