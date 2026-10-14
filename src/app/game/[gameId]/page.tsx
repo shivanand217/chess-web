@@ -131,6 +131,9 @@ export default function GamePage({ params }: { params: Promise<Params> }) {
             Chess
           </Link>
           <nav className="flex items-center gap-3 text-xs text-neutral-400">
+            <Link href="/games" className="hover:text-neutral-200">
+              Your games
+            </Link>
             <Link href="/leaderboard" className="hover:text-neutral-200">
               Leaderboard
             </Link>
