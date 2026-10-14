@@ -89,6 +89,12 @@ export default function Home() {
                 Play
               </button>
               <Link
+                href={`/player/${encodeURIComponent(session.username)}`}
+                className="rounded-md border border-neutral-700 px-5 py-2.5 text-sm font-medium text-neutral-200 hover:bg-neutral-900"
+              >
+                Your profile
+              </Link>
+              <Link
                 href="/games"
                 className="rounded-md border border-neutral-700 px-5 py-2.5 text-sm font-medium text-neutral-200 hover:bg-neutral-900"
               >

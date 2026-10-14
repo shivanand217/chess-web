@@ -3,6 +3,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { LeaderboardPage } from "@chess/client";
 import { chessClient } from "@/lib/chess-client";
@@ -77,7 +78,12 @@ export default function LeaderboardPage() {
                   #{e.rank}
                 </td>
                 <td className="py-2 pr-3 font-mono">
-                  {e.username}
+                  <Link
+                    href={`/player/${encodeURIComponent(e.username)}`}
+                    className="hover:underline"
+                  >
+                    {e.username}
+                  </Link>
                   {me ? (
                     <span className="ml-2 text-xs text-emerald-400">(you)</span>
                   ) : null}
