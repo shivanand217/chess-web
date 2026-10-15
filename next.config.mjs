@@ -8,6 +8,9 @@
 //      restores the TS compiler's resolution semantics.
 const nextConfig = {
   reactStrictMode: true,
+  // `output: 'standalone'` emits a self-contained server bundle under .next/standalone/ with only
+  // the deps the app actually uses. The Fly Dockerfile copies that bundle instead of node_modules.
+  output: 'standalone',
   // Keeping `typedRoutes` off for now — it requires the full route registry file to exist before any
   // `router.push('/foo')` typechecks, which is friction during scaffolding. Re-enable once the IA is
   // stable and we can commit to generating the registry file in CI.

@@ -1,0 +1,9 @@
+# Keep the Docker build context small. The build stage re-runs pnpm install from the lockfile so
+# bundled node_modules would just slow things down.
+node_modules
+.next
+.turbo
+.git
+.github
+.DS_Store
+*.log
