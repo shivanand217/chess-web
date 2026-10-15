@@ -1,0 +1,49 @@
+# CI for the frontend. The SDK (@chess/client, @chess/protocol) is referenced via a `link:` to the
+# Chess repo at `../Chess`, so this workflow checks out both repos side-by-side and installs from
+# chess-web. Lint, typecheck, and Next's production build on every PR + push to main.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Chess (SDK source)
+        uses: actions/checkout@v4
+        with:
+          # Assumes both repos live under the same owner. Override here if that ever changes.
+          repository: ${{ github.repository_owner }}/Chess
+          path: Chess
+
+      - name: Checkout chess-web
+        uses: actions/checkout@v4
+        with:
+          path: chess-web
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: chess-web/pnpm-lock.yaml
+
+      - name: Install
+        working-directory: chess-web
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: chess-web
+        run: pnpm typecheck
+
+      - name: Build
+        working-directory: chess-web
+        run: pnpm build
