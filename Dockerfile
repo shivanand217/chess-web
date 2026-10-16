@@ -3,14 +3,17 @@
 # containing BOTH `Chess/` and `chess-web/` side-by-side:
 #
 #   cd ~/Documents/bck-works
-#   fly deploy --local-only --config chess-web/fly.toml --dockerfile chess-web/Dockerfile .
+#   docker build -f chess-web/Dockerfile \
+#     --build-arg NEXT_PUBLIC_GATEWAY_URL=https://chess-gateway-xxx.a.run.app \
+#     -t <registry>/chess-web:<tag> .
 #
-# The build stage copies both repos, installs chess-web's deps (which resolve against the local
-# Chess checkout), and runs `next build` with `output: 'standalone'`. The runtime stage copies
-# just the standalone bundle so the image stays small.
+# NEXT_PUBLIC_* is baked into the Next bundle at build time, so it must be a build arg (not a
+# runtime env var — Next ignores runtime NEXT_PUBLIC_*).
 FROM node:22-slim AS build
 WORKDIR /src
 RUN corepack enable
+ARG NEXT_PUBLIC_GATEWAY_URL
+ENV NEXT_PUBLIC_GATEWAY_URL=$NEXT_PUBLIC_GATEWAY_URL
 
 # Pull in the SDK source and the frontend. Both come from the build context (the parent dir).
 COPY Chess/package.json Chess/pnpm-workspace.yaml Chess/pnpm-lock.yaml Chess/.npmrc Chess/tsconfig.base.json Chess/
